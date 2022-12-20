@@ -101,12 +101,14 @@ test_that('eclusters', {
   #gg.reduced$eclusters2(verbose = TRUE)
   #xpect_equal(gg.reduced$edges[type == 'ALT'][1]$dt$ecluster, 1)
 
-  expect_null(gG()$eclusters(verbose = TRUE))
+  ## expect_null(gG()$eclusters(verbose = TRUE))
+  gg.empty = gG()$eclusters()
+  expect_true(is.null(gg.empty$meta$recip_bp) || (gg.empty$meta$recip_bp[, .N] == 0))
   # TODO: eclusters2 is failing (see error at the bottom of this page: https://app.travis-ci.com/github/mskilab/gGnome/builds/238302593)
   #expect_null(gG()$eclusters2(verbose = TRUE))
 
   gg.reduced = gg.jabba %&% gr
-  bla = gg.reduced$copy$eclusters(weak = FALSE, paths = TRUE, verbose = TRUE)
+  bla = gg.reduced$copy$eclusters(weak = FALSE, verbose = TRUE)
   #expect_equal(gg.reduced$edges[type == 'ALT'][1]$dt$epath, 'p1')
 
   gg.reduced = gg.jabba %&% gr

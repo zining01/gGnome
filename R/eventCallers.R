@@ -3165,12 +3165,14 @@ qrp = function(gg, thresh = 1e6, max.small = 1e5,
         stopifnot(length(breakend_pairing) > 0)
     }
     
-    gg$eclusters2(thresh = thresh,
-                  max.small = max.small,
-                  only_chains = TRUE,
-                  ignore.small = TRUE,
-                  strict = breakend_pairing,
-                  ignore.isolated = TRUE)
+    ## gg$eclusters2(thresh = thresh,
+    ##               max.small = max.small,
+    ##               only_chains = TRUE,
+    ##               ignore.small = TRUE,
+    ##               strict = breakend_pairing,
+    ##               ignore.isolated = TRUE)
+    gg$eclusters(thresh = thresh,
+                 max.small = max.small)
 
     recip_event = copy3(gg$meta$recip_event)
 

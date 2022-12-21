@@ -1249,7 +1249,7 @@ chromoplexy = function(gg,
   if (!length(candidates))
     return(gg.empty)
 
-  gg.tmp = gG(si2gr(gg), junctions = candidates$junctions[, 'og.id'])$eclusters(thresh = max.dist)
+  gg.tmp = gG(si2gr(gg), junctions = candidates$junctions[, 'og.id'])$eclusters(thresh = max.dist, strict = "loose")
 
   gg$edges$mark(ecluster = as.integer(NA))
   gg$edges[gg.tmp$edges$dt$og.id]$mark(ecluster = gg.tmp$edges$dt$ecluster)
@@ -3171,8 +3171,8 @@ qrp = function(gg, thresh = 1e6, max.small = 1e5,
     ##               ignore.small = TRUE,
     ##               strict = breakend_pairing,
     ##               ignore.isolated = TRUE)
-    gg$eclusters(thresh = thresh,
-                 max.small = max.small)
+    gg$eclusters(thresh = thresh)##,
+                 ## max.small = max.small)
 
     recip_event = copy3(gg$meta$recip_event)
 

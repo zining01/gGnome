@@ -3146,19 +3146,20 @@ gGraph = R6::R6Class("gGraph",
                        #' @title eclusters
                        #' @description
                        #' identify ALT edges part of reciprocal paths and cycles
+                       #'
                        #' @details
-                       #' dsfklj
+                       #' edges are considered to be 
                        #'
                        #' @param thresh (numeric) threshold distance in base pairs between breakpoints considered to be "quasi-reciprocal" (default 1e3)
                        #' @param weak (logical) return weakly connected components (default TRUE)
-                       #' @param max.small (numeric) threshold on minimum span of junctions
+                       #' @param max.small (numeric) threshold on minimum span of junctions (default zero)
                        #' @param strict (character) one of strict, one_to_one, loose (default "strict")
                        #' @param verbose (logical)
                        #'
                        #' @return (invisibly) graph with $meta$recip_bp populated and $ecluster annotation on edges
                        eclusters = function(thresh = 1e3,
+                                            max.small = 0,
                                             weak = TRUE,
-                                            max.small = 1e4,
                                             strict = c("strict", "one_to_one", "loose"),
                                             verbose = FALSE)
                        {
@@ -3176,12 +3177,14 @@ gGraph = R6::R6Class("gGraph",
                            self$set(recip_bp = data.table(), recip_event = data.table())
 
                            if ((!length(self$edges)) ||
-                               (!length(self$edges[type == "ALT"])))
+                               (!length(self$edges[(self$edges$dt$type == "ALT") &
+                                                   (self$junctions$span >= max.small)])))
                            {
                                return(invisible(self))
                            }
 
-                           altedges = self$edges[type == "ALT"]
+                           altedges = self$edges[(self$edges$dt$type == "ALT") & 
+                                                 (self$junctions$span >= max.small)]
 
                            ## create a table of breakpoints
                            bp = grl.unlist(altedges$grl)[, c("grl.ix", "grl.iix", "class", "edge.id")]
@@ -3193,13 +3196,33 @@ gGraph = R6::R6Class("gGraph",
                            ## (no self-loops/on-diagonal elements)
                            diag(bp.dist) = NA
 
-                           ## no edges between breakends originating from the same junction
-                           paired.breakends = merge.data.table(bp.dt[grl.iix == 1, .(edge.id, breakpoint.index)], bp.dt[grl.iix == 2, .(edge.id, breakpoint.index)], by = "edge.id", suffixes = c(".1", ".2"))
-                           bp.dist[paired.breakends[, cbind(breakpoint.index.1, breakpoint.index.2)]] = NA
-                           bp.dist[paired.breakends[, cbind(breakpoint.index.2, breakpoint.index.1)]] = NA
+                           ## mask any breakend distances above the distance threshold
+                           ## or above the row minimum
+                           above.threshold = bp.dist > thresh
+                           
+                           bp.dist[which(above.threshold, arr.ind = TRUE)] = NA
 
-                           ## select only breakend distances below length threshold
-                           edge.matrix = which(bp.dist < thresh,
+                           if (strict != "loose")
+                           {
+                               above.row.min = bp.dist > matrixStats::rowMins(bp.dist, na.rm = TRUE)
+                               above.col.min = Matrix::t(Matrix::t(bp.dist) > matrixStats::colMins(bp.dist, na.rm = TRUE))
+                               bp.dist[which(above.row.min, arr.ind = TRUE)] = NA
+                               bp.dist[which(above.col.min, arr.ind = TRUE)] = NA
+
+                               stopifnot(all(rowSums(!is.na(bp.dist)) <= 1, na.rm = TRUE))
+                               stopifnot(all(colSums(!is.na(bp.dist)) <= 1, na.rm = TRUE))
+                           }
+
+                           ## edges between breakends of the same junction
+                           paired.breakends = merge.data.table(bp.dt[grl.iix == 1, .(edge.id, breakpoint.index)],
+                                                               bp.dt[grl.iix == 2, .(edge.id, breakpoint.index)],
+                                                               by = "edge.id",
+                                                               suffixes = c(".1", ".2"))
+                           bp.dist[paired.breakends[, cbind(breakpoint.index.1, breakpoint.index.2)]] = -1
+                           bp.dist[paired.breakends[, cbind(breakpoint.index.2, breakpoint.index.1)]] = -1
+
+                           ## select only non-NA breakends
+                           edge.matrix = which(!is.na(bp.dist),
                                                arr.ind = TRUE,
                                                useNames = TRUE)
 
@@ -3214,24 +3237,32 @@ gGraph = R6::R6Class("gGraph",
                            ## if we are using strict pairing:
                            ## there should only be one non-NA entry per rol/column
                            ## furthermore the matrix should be symmetric
-                           strict.edge.matrix.dt = edge.matrix.dt[(i < j),
-                                                                  .(j = .SD[which.min(dist), j],
-                                                                    dist = min(dist)),
-                                                                  by = i]
-                           final.edge.matrix.dt = rbind(strict.edge.matrix.dt[, .(i, j, dist)],
-                                                        strict.edge.matrix.dt[, .(i = j, j = i, dist)])
+                           ## strict.edge.matrix.dt = edge.matrix.dt[(i < j),
+                           ##                                        .(j = .SD[which.min(dist), j],
+                           ##                                          dist = min(dist)),
+                           ##                                        by = i]
+
+                           ## final.edge.matrix.dt = rbind(strict.edge.matrix.dt[, .(i, j, dist)],
+                           ##                              strict.edge.matrix.dt[, .(i = j, j = i, dist)])
+                           final.edge.matrix.dt = edge.matrix.dt[, .(i, j, dist, is.gap = dist >= 0)]
+
 
                            ## annotate with gap polarity information
                            ## (needed below for gap orientation classification)
                            ## e.g. gap polarity is + (TRUE) if
                            ## the positive stranded breakend precedes the negative stranded breakend
                            ## otherwise it is - (FALSE)
-                           final.edge.matrix.dt[, gap.polarity := ifelse(as.character(bp.dt[i, strand]) == "+",
-                                                                         bp.dt[i, start] < bp.dt[j, start],
-                                                                         bp.dt[j, start] < bp.dt[i, start])]
+                           final.edge.matrix.dt[(is.gap),
+                                                gap.polarity := ifelse(as.character(bp.dt[i, strand]) == "+",
+                                                                       bp.dt[i, start] < bp.dt[j, start],
+                                                                       bp.dt[j, start] < bp.dt[i, start])]
+
+                           ## add gap ID
+                           final.edge.matrix.dt[(is.gap),
+                                                gap.id := paste(pmin(i,j), pmax(i,j), sep = ",")]
 
                            ## similarly add the footprint of the gap
-                           final.edge.matrix.dt[, footprint := paste0(bp.dt[i, seqnames], ":",
+                           final.edge.matrix.dt[(is.gap), footprint := paste0(bp.dt[i, seqnames], ":",
                                                                       pmin(bp.dt[i, start], bp.dt[j, start]),
                                                                       "-",
                                                                       pmax(bp.dt[i, start], bp.dt[j, start]),
@@ -3245,7 +3276,7 @@ gGraph = R6::R6Class("gGraph",
                            ## compute clusters and list nodes by cluster membership
                            ## strongly connected components consists of (possibly nested) cycles
                            clusters.res = igraph::clusters(
-                               igraph::graph.adjacency(adj),
+                               igraph::graph.adjacency(adj, mode = "directed"),
                                mode = ifelse(weak, 'weak', 'strong')
                            )
 
@@ -3256,33 +3287,46 @@ gGraph = R6::R6Class("gGraph",
                            clusters.res.dt[, cluster.members := paste(.SD[order(edge.id), unique(edge.id)],
                                                                       collapse = ","),
                                            by = cluster.id]
+                           
+                           ## if there are no >2 junction clusters, stop
+                           if (!clusters.res.dt[(n.junctions > 1), .N])
+                           {
+                               return(invisible(self))
+                           }
+                           
+
                            unique.clusters.dt = clusters.res.dt[n.junctions > 1,
                                                                 .(cluster.id = cluster.id[1]),
                                                                 by = cluster.members]
 
+                           
                            clusters.res.dt = clusters.res.dt[(cluster.id %in% unique.clusters.dt$cluster.id)]
+
+                           ## check!!
+                           check = clusters.res.dt[, .(nc = length(unique(cluster.id))), by = edge.id]
+                           stopifnot(all(check[, nc]==1))
 
                            ## annotate breakpoints with cluster id
                            bp.dt[, ecluster := clusters.res.dt$cluster.id[match(edge.id, clusters.res.dt$edge.id)]]
 
                            ## annotate breakpoints with inter-breakpoint distance
-                           bp.dt[, bp.dist := final.edge.matrix.dt$dist[match(breakpoint.index,
-                                                                              final.edge.matrix.dt$i)]]
-                           bp.dt[, gap.polarity := final.edge.matrix.dt$gap.polarity[match(breakpoint.index,
-                                                                                      final.edge.matrix.dt$i)]]
-                           bp.dt[, gap := final.edge.matrix.dt$footprint[match(breakpoint.index,
-                                                                               final.edge.matrix.dt$i)]]
+                           ## temporary table to facilitate matching
+                           match.dt = final.edge.matrix.dt[(is.gap), ]
+                           bp.dt[, bp.dist := match.dt$dist[match(breakpoint.index, match.dt$i)]]
+                           bp.dt[, gap.polarity := match.dt$gap.polarity[match(breakpoint.index, match.dt$i)]]
+                           bp.dt[, gap := match.dt$footprint[match(breakpoint.index, match.dt$i)]]
+                           bp.dt[, gap.id := match.dt$gap.id[match(breakpoint.index, match.dt$i)]]
 
                            ## add more metadata describing positive versus negative gaps
                            bp.dt[!is.na(ecluster),
                                  ":="(njuncs = length(unique(edge.id)),
                                       all_positive = all(gap.polarity, na.rm = TRUE),
                                       all_negative = all(!gap.polarity, na.rm = TRUE),
-                                      num_positive = .SD[(gap.polarity), length(unique(edge.id))],
-                                      num_negative = .SD[(!gap.polarity), length(unique(edge.id))],
+                                      num_positive = .SD[(gap.polarity), length(unique(gap.id))],
+                                      num_negative = .SD[(!gap.polarity), length(unique(gap.id))],
                                       mixed = any(gap.polarity, na.rm = TRUE) &
                                           any(!gap.polarity, na.rm = TRUE),
-                                      footprint = paste(.SD[, unique(gap)], collapse = ","),
+                                      footprint = paste(.SD[!is.na(gap), unique(gap)], collapse = ","),
                                       bridge = any(is.na(bp.dist))),
                                  by = ecluster]
 

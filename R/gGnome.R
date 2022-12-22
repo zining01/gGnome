@@ -3151,15 +3151,17 @@ gGraph = R6::R6Class("gGraph",
                        #' edges are considered to be 
                        #'
                        #' @param thresh (numeric) threshold distance in base pairs between breakpoints considered to be "quasi-reciprocal" (default 1e3)
-                       #' @param weak (logical) return weakly connected components (default TRUE)
                        #' @param max.small (numeric) threshold on minimum span of junctions (default zero)
-                       #' @param strict (character) one of strict, one_to_one, loose (default "strict")
-                       #' @param verbose (logical)
+                       #' @param weak (logical) return weakly connected components (default TRUE)
+                       #' @param paths (logical) return paths? (default TRUE)
+                       #' @param strict (character) one of strict, one_to_one, loose (default "one_to_one")
+                       #' @param verbose (logical) print stuff? default FALSE
                        #'
                        #' @return (invisibly) graph with $meta$recip_bp populated and $ecluster annotation on edges
                        eclusters = function(thresh = 1e3,
                                             max.small = 0,
                                             weak = TRUE,
+                                            paths = TRUE,
                                             strict = c("strict", "one_to_one", "loose"),
                                             verbose = FALSE)
                        {
@@ -3218,7 +3220,7 @@ gGraph = R6::R6Class("gGraph",
                                                                bp.dt[grl.iix == 2, .(edge.id, breakpoint.index)],
                                                                by = "edge.id",
                                                                suffixes = c(".1", ".2"))
-                           bp.dist[paired.breakends[, cbind(breakpoint.index.1, breakpoint.index.2)]] = -1
+                           bp.dist[paired.breakends[, cbind(breakpoint.index.1, breakpoint.index.2)]] = NA
                            bp.dist[paired.breakends[, cbind(breakpoint.index.2, breakpoint.index.1)]] = -1
 
                            ## select only non-NA breakends

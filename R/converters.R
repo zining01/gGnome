@@ -1079,7 +1079,7 @@ read.juncs = function(rafile,
 
         if (!"SVTYPE" %in% names(VariantAnnotation::info(vcf)))
         {
-            stop("vcf missing SVTYPE info field")
+            warning("vcf missing SVTYPE info field; assuming BND-formatted")
         }
 
         ## check if zero length
@@ -1092,6 +1092,10 @@ read.juncs = function(rafile,
         info.dt = cbind(as.data.table(MatrixGenerics::rowRanges(vcf)),
                         as.data.table(VariantAnnotation::info(vcf)))
         info.dt[, seqnames := as.character(seqnames)]
+        if (is.null(info.dt$SVTYPE))
+        {
+            info.dt[, SVTYPE := "BND"]
+        }
         ## supported indicates whether that SV type can be read as a junction by this function
         info.dt[, supported := grepl("(^BND)|(^DEL)|(^DUP)|(^INV)|(^TRA)", SVTYPE)]
 

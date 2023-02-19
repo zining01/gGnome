@@ -3150,16 +3150,18 @@ gGraph = R6::R6Class("gGraph",
                        #' @details
                        #' edges are considered to be 
                        #'
-                       #' @param thresh (numeric) threshold distance in base pairs between breakpoints considered to be "quasi-reciprocal" (default 1e3)
-                       #' @param max.small (numeric) threshold on minimum span of junctions (default zero)
+                       #' @param thresh (numeric) threshold distance in base pairs between breakpoints considered to be "quasi-reciprocal" (default 1e6)
+                       #' @param max.small (numeric) threshold on minimum span of junctions (default 1e4)
+                       #' @param min.pad (numeric) minimum pad between breakends involved in eclusters (default 1e3)
                        #' @param weak (logical) return weakly connected components (default TRUE)
                        #' @param paths (logical) return paths? (default TRUE)
                        #' @param strict (character) one of strict, one_to_one, loose (default "one_to_one")
                        #' @param verbose (logical) print stuff? default FALSE
                        #'
                        #' @return (invisibly) graph with $meta$recip_bp populated and $ecluster annotation on edges
-                       eclusters = function(thresh = 1e3,
-                                            max.small = 0,
+                       eclusters = function(thresh = 1e6,
+                                            max.small = 1e4,
+                                            min.pad = 1e3,
                                             weak = TRUE,
                                             paths = TRUE,
                                             strict = c("strict", "one_to_one", "loose"),
@@ -3180,13 +3182,15 @@ gGraph = R6::R6Class("gGraph",
 
                            if ((!length(self$edges)) ||
                                (!length(self$edges[(self$edges$dt$type == "ALT") &
-                                                   (self$junctions$span >= max.small)])))
+                                                   (self$edges$dt$class == "INV-like" |
+                                                    self$junctions$span >= max.small)])))
                            {
                                return(invisible(self))
                            }
 
                            altedges = self$edges[(self$edges$dt$type == "ALT") & 
-                                                 (self$junctions$span >= max.small)]
+                                                 (self$edges$dt$class == "INV-like" |
+                                                  self$junctions$span >= max.small)]
 
                            ## create a table of breakpoints
                            bp = grl.unlist(altedges$grl)[, c("grl.ix", "grl.iix", "class", "edge.id")]
@@ -3194,23 +3198,43 @@ gGraph = R6::R6Class("gGraph",
                            
                            ## create a square matrix of breakpoint distances
                            bp.dist = gr.dist(bp, gr.flipstrand(bp))
+                           other.dist = gr.dist(bp, bp)
                            ## ensure that breakends cannot be adjacent to themselves
                            ## (no self-loops/on-diagonal elements)
                            diag(bp.dist) = NA
+                           diag(other.dist) = NA
 
                            ## mask any breakend distances above the distance threshold
                            ## or above the row minimum
                            above.threshold = bp.dist > thresh
-                           
                            bp.dist[which(above.threshold, arr.ind = TRUE)] = NA
 
+                           ## get rid of junctions that have one breakpoint insufficiently padded
+                           browser()
+                           tmp.bp.dist = copy(bp.dist)
+                           tmp.bp.dist[which(tmp.bp.dist > matrixStats::rowMins(tmp.bp.dist),
+                                             arr.ind = TRUE)] = NA
+                           reciprocal.mins = matrixStats::rowMins(tmp.bp.dist, na.rm = TRUE) < min.pad
+                           non.reciprocal.mins = matrixStats::rowMins(other.dist, na.rm = TRUE) < min.pad
+                           bp.dist[which(reciprocal.mins), ] = NA
+                           bp.dist[which(non.reciprocal.mins), ] = NA
+                           bp.dist[, which(reciprocal.mins)] = NA
+                           bp.dist[, which(non.reciprocal.mins)] = NA
+
+                           ## TODO: get rid of the corresponding breakpoint of each junction
+                           
                            if (strict != "loose")
                            {
                                above.row.min = bp.dist > matrixStats::rowMins(bp.dist, na.rm = TRUE)
                                above.col.min = Matrix::t(Matrix::t(bp.dist) > matrixStats::colMins(bp.dist, na.rm = TRUE))
                                bp.dist[which(above.row.min, arr.ind = TRUE)] = NA
                                bp.dist[which(above.col.min, arr.ind = TRUE)] = NA
-
+                               ## if there are duplicates, ties will have to be broken randomly by selecting
+                               ## whichever breakend comes first...
+                               keep.idx = as.matrix(as.data.table(which(!is.na(bp.dist), arr.ind = TRUE))[order(row)][order(col)][!duplicated(row)][!duplicated(col)])
+                               bp.dist.new = matrix(nrow = nrow(bp.dist), ncol = ncol(bp.dist))
+                               bp.dist.new[keep.idx] = bp.dist[keep.idx]
+                               bp.dist = bp.dist.new
                                stopifnot(all(rowSums(!is.na(bp.dist)) <= 1, na.rm = TRUE))
                                stopifnot(all(colSums(!is.na(bp.dist)) <= 1, na.rm = TRUE))
                            }
@@ -3220,6 +3244,11 @@ gGraph = R6::R6Class("gGraph",
                                                                bp.dt[grl.iix == 2, .(edge.id, breakpoint.index)],
                                                                by = "edge.id",
                                                                suffixes = c(".1", ".2"))
+
+                           ## make sure neither of these are removed
+                           browser()
+                           paired.breakends = paired.breakends[(!breakpoint.index.1 %in% which(reciprocal.mins)) & (!breakpoint.index.2 %in% which(reciprocal.mins)) & (!breakpoint.index.1 %in% which(non.reciprocal.mins)) & (!breakpoint.index.2 %in% which(non.reciprocal.mins))]
+
                            bp.dist[paired.breakends[, cbind(breakpoint.index.1, breakpoint.index.2)]] = NA
                            bp.dist[paired.breakends[, cbind(breakpoint.index.2, breakpoint.index.1)]] = -1
 
